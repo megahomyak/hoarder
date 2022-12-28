@@ -10,18 +10,23 @@ import re
 from aiogram.utils.exceptions import ChatNotFound
 
 HELLO = """
-Вы можете предложить объявление в барахолку Рога и Копыта, нажав на кнопку ниже.
+Вы можете предложить объявление в томскую барахолку Hookah and Vape, нажав на кнопку ниже.
 """.strip()
 PROVIDE_THE_DEVICE_NAME = """
-Во время заполнения анкеты вы всегда можете воспользоваться кнопкой отмены.
+Во время создания объявления вы всегда можете воспользоваться кнопкой отмены.
 
-Укажите полное название девайса, его цвет и вид:
+Укажите полное название устройства и его расцветку:
 """.strip()
-RANK_THE_DEVICE = """
-Оцените состояние девайса по пятибалльной шкале:
+RANK_THE_OPERABILITY_OF_THE_DEVICE = """
+Оцените работоспособность девайса по пятибалльной шкале, воспользовавшись кнопками ниже.
+
+Подсказка: "5" значит "девайс в идеальном состоянии и почти не был использован", "4" значит "девайс в хорошем состоянии и был активно использован", "3" значит "девайс имеет некоторые незначительные неисправности", "2" значит "девайс имеет значительные неисправности, мешающие его работе, но они могут быть легко единоразово и быстро исправлены без дополнительного оборудования", "1" значит "девайс показывает признаки жизни, но может не работать".
 """.strip()
+OPERABILITY_RANKS = list("12345")
 SPECIFY_THE_COMPONENTS = """
-Укажите, какие комплектующие у вас от него есть:
+Перечислите аксессуары, оставшиеся от устройства. Если их нет, так и напишите.
+
+<i>Пример: "Коробка, запасной испаритель на 0.3 Ом и кабель формата USB-C".</i>
 """.strip()
 PROVIDE_THE_PRICE = """
 Укажите цену (просто числом, валюта всегда будет российскими рублями):
@@ -34,7 +39,7 @@ CANCEL = "Отменить"
 CONTINUE = "Продолжить"
 MEETING_METHOD_BUTTONS = [["Самовывоз"], ["Можем встретиться"]]
 PROVIDE_ONE_DEVICE_IMAGE = """
-Предоставьте <strong>одну</strong> фотографию девайса. Потом вы сможете предоставить ещё одну или две, если необходимо.
+Предоставьте <bold>одну</bold> фотографию девайса. Потом вы сможете предоставить ещё одну или две, если необходимо.
 """.strip()
 PROVIDE_THE_DEVICE_PHOTO = """
 Пожалуйста, предоставьте фотографию девайса.
@@ -160,7 +165,7 @@ async def post_periodically():
         except IndexError:
             logger.debug("NO POSTS FOUND IN THE QUEUE")
         except ChatNotFound:
-            logger.error("CHAT FOR ADVERTISEMENTS WAS NOT FOUND")
+            logger.error("CHANNEL FOR POSTING WAS NOT FOUND")
         await asyncio.sleep(config.delay_between_posts_in_seconds)
 
 
@@ -250,7 +255,7 @@ async def user_route(message: types.Message):
     for string, replacement in replacements.items():
         device_name = device_name.replace(string.lower(), replacement)
     device_rank = await choice(
-        message, RANK_THE_DEVICE, [[str(i) for i in range(1, 6)]]
+        message, RANK_THE_OPERABILITY_OF_THE_DEVICE, [OPERABILITY_RANKS]
     )
     await sender(SPECIFY_THE_COMPONENTS, [])
     device_components = (await wait_for_message(
@@ -307,7 +312,7 @@ async def user_route(message: types.Message):
         f"Продавец: @{message.from_user.username}\n"
         f"\n"
         f"<strong>{device_name}</strong>\n"
-        f"* Состояние: {device_rank}\n"
+        f"* Работоспособность: {device_rank}/{len(OPERABILITY_RANKS)}\n"
         f"* Комплектация: {device_components}\n"
         f"* Цена: {device_price} рублей\n"
         f"* Предпочтительный тип встречи: {meeting_type}"
