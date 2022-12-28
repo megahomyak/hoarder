@@ -88,6 +88,7 @@ class Config:
     token: str
     admin_chat_id: int
     posting_channel_id: str
+    delay_between_posts_in_seconds: int
 
 
 config = Config(**json.load(open("config.json")))
@@ -157,7 +158,7 @@ async def post_periodically():
         except IndexError:
             logger.debug("NO POSTS FOUND IN THE QUEUE")
             pass
-        await asyncio.sleep(30)
+        await asyncio.sleep(config.delay_between_posts_in_seconds)
 
 
 async def wait_for_message(previous: types.Message, filters: Iterable[Filter] = ()) -> types.Message:
