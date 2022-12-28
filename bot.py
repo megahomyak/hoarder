@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import json
 import re
 
+from aiogram.utils.exceptions import ChatNotFound
+
 HELLO = """
 Вы можете предложить объявление в барахолку Рога и Копыта, нажав на кнопку ниже.
 """.strip()
@@ -157,7 +159,8 @@ async def post_periodically():
             await send_a_post(config.posting_channel_id, post.file_ids, post.text)
         except IndexError:
             logger.debug("NO POSTS FOUND IN THE QUEUE")
-            pass
+        except ChatNotFound:
+            logger.error("CHAT FOR ADVERTISEMENTS WAS NOT FOUND")
         await asyncio.sleep(config.delay_between_posts_in_seconds)
 
 
