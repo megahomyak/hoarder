@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import json
 import re
 import html
+import re
 
 from aiogram.utils.exceptions import ChatNotFound
 
@@ -51,6 +52,7 @@ PROVIDE_THE_DEVICE_PHOTOS = """
 PRESS_THE_BUTTON_TO_CONTINUE_IF_YOU_ARE_DONE = """
 Нажмите на кнопку для продолжения, если вы закончили.
 """.strip()
+MIN_PHOTOS_AMOUNT = 1
 MAX_PHOTOS_AMOUNT = 3
 DO_NOT_PROVIDE_MORE_THAN_THREE_PHOTOS = """
 Пожалуйста, предоставьте <strong>не более трёх</strong> фотографий девайса. Предоставленные вами фотографии были сброшены. Отправьте ещё фотографии.
@@ -264,7 +266,7 @@ async def user_route(message: Message):
         message, filters=[TEXT_EXISTS_FILTER]
     )).origin.text
     for string, replacement in replacements.items():
-        device_name = device_name.replace(string.lower(), replacement)
+        device_name = re.sub(re.escape(string), replacement, device_name, flags=re.IGNORECASE)
     device_operability_rank = await choice(
         message, RANK_THE_OPERABILITY_OF_THE_DEVICE, [OPERABILITY_RANKS]
     )
@@ -292,7 +294,7 @@ async def user_route(message: Message):
     photo_file_ids = []
     while True:
         new_message = await wait_for_message(message)
-        if new_message.origin.text == CONTINUE and len(photo_file_ids) > 1:
+        if new_message.origin.text == CONTINUE and len(photo_file_ids) >= MIN_PHOTOS_AMOUNT:
             break
         elif new_message.photo_ids:
             old_photos_amount = len(photo_file_ids)
