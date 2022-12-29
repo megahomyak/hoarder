@@ -1,11 +1,12 @@
 import logging
 from typing import Callable, Dict, Iterable, List, Optional, Union
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, types
 from aiogram.types.reply_keyboard import ReplyKeyboardMarkup, KeyboardButton
 import asyncio
 from dataclasses import dataclass
 import json
 import re
+import html
 
 from aiogram.utils.exceptions import ChatNotFound
 
@@ -45,19 +46,10 @@ CANCEL = "Отменить"
 CONTINUE = "Продолжить"
 MEETING_METHOD_BUTTONS = [["Самовывоз"], ["Можем встретиться"]]
 PROVIDE_ONE_DEVICE_IMAGE = """
-Предоставьте <strong>одну</strong> фотографию девайса. Потом вы сможете предоставить ещё одну или две, если необходимо.
+Предоставьте от одной до трёх фотографий девайса.
 """.strip()
 PROVIDE_THE_DEVICE_PHOTO = """
-Пожалуйста, предоставьте фотографию девайса.
-""".strip()
-PROVIDE_THE_DEVICE_PHOTO_OR_SKIP = """
-Пожалуйста, предоставьте фотографию девайса или пропустите этот шаг.
-""".strip()
-PROVIDE_THE_SECOND_DEVICE_IMAGE = """
-Предоставьте вторую фотографию девайса или нажмите на кнопку для продолжения.
-""".strip()
-PROVIDE_THE_THIRD_DEVICE_IMAGE = """
-Предоставьте третью фотографию девайса или нажмите на кнопку для продолжения.
+Пожалуйста, предоставьте <strong>от одной до трёх</strong> фотографий девайса.
 """.strip()
 PROVIDE_THE_ADDITIONAL_INFORMATION = """
 Предоставьте дополнительную информацию (или нажмите на кнопку продолжения, если дополнительной информации нет):
@@ -106,7 +98,6 @@ class Config:
 
 config = Config(**json.load(open("config.json")))
 bot = Bot(config.token)
-dp = Dispatcher(bot)
 
 logger = logging.getLogger("hoarder")
 logger.setLevel(logging.DEBUG)
@@ -126,7 +117,13 @@ class Post:
     text: str
 
 
-waiting_for_message: Dict[int, Optional[types.Message]] = {}
+@dataclass
+class Message:
+    origin: types.Message
+    file_ids: list
+
+
+waiting_for_message: Dict[int, Optional[Message]] = {}
 post_queue: List[Post] = []
 
 replacements = {}
@@ -139,12 +136,12 @@ except FileNotFoundError:
 
 @dataclass
 class Filter:
-    filter: Callable[[types.Message], bool]
+    filter: Callable[[Message], bool]
     failure_message: str
 
 
 TEXT_EXISTS_FILTER = Filter(
-    filter=lambda message: bool(message.text),
+    filter=lambda message: bool(message.origin.text),
     failure_message=PLEASE_SEND_TEXT
 )
 
@@ -175,13 +172,13 @@ async def post_periodically():
         await asyncio.sleep(config.delay_between_posts_in_seconds)
 
 
-async def wait_for_message(previous: types.Message, filters: Iterable[Filter] = ()) -> types.Message:
-    assert previous.from_id not in waiting_for_message
-    logger.debug("WAITING FOR %d", previous.from_id)
-    waiting_for_message[previous.from_id] = None
+async def wait_for_message(previous: Message, filters: Iterable[Filter] = ()) -> Message:
+    assert previous.origin.from_id not in waiting_for_message
+    logger.debug("WAITING FOR %d", previous.origin.from_id)
+    waiting_for_message[previous.origin.from_id] = None
     while True:
         try:
-            message = waiting_for_message[previous.from_id]
+            message = waiting_for_message[previous.origin.from_id]
         except KeyError:
             # Cancellation happened
             raise CancellationError
@@ -189,29 +186,30 @@ async def wait_for_message(previous: types.Message, filters: Iterable[Filter] = 
             await asyncio.sleep(0)
         else:
             logger.debug("FOUND %s", message)
-            del waiting_for_message[previous.from_id]
+            del waiting_for_message[previous.origin.from_id]
             for filter_ in filters:
                 if not filter_.filter(message):
-                    waiting_for_message[previous.from_id] = None
+                    waiting_for_message[previous.origin.from_id] = None
                     await bot.send_message(
-                        previous.from_id, filter_.failure_message
+                        previous.origin.from_id, filter_.failure_message,
+                        parse_mode=DEFAULT_PARSE_MODE,
                     )
                     break
             else:
                 return message
 
 
-async def choice(previous: types.Message, message: str, buttons: List[List[str]]):
+async def choice(previous: Message, message: str, buttons: List[List[str]]):
     button_names = set()
     for row in buttons:
         button_names.update(row)
     await send_message(previous, message, buttons)
     while True:
         new_message = await wait_for_message(previous)
-        if new_message.text in button_names:
-            return new_message.text
+        if new_message.origin.text in button_names:
+            return new_message.origin.text
         else:
-            await bot.send_message(previous.from_id, PRESS_ONE_OF_THE_BUTTONS)
+            await bot.send_message(previous.origin.from_id, PRESS_ONE_OF_THE_BUTTONS)
 
 
 def generate_a_keyboard(buttons: List[List[str]]):
@@ -223,17 +221,17 @@ def generate_a_keyboard(buttons: List[List[str]]):
     return keyboard
 
 
-async def send_message(previous: types.Message, message: str, buttons: List[List[str]]):
+async def send_message(previous: Message, message: str, buttons: List[List[str]]):
     keyboard = generate_a_keyboard(buttons + [[CANCEL]])
     await bot.send_message(
-        previous.from_id, message, reply_markup=keyboard,
+        previous.origin.from_id, message, reply_markup=keyboard,
         parse_mode=DEFAULT_PARSE_MODE,
     )
 
 
-async def send_first_button(previous: types.Message, message: str):
+async def send_first_button(previous: Message, message: str):
     await bot.send_message(
-        previous.from_id, message,
+        previous.origin.from_id, message,
         reply_markup=generate_a_keyboard([[PROVIDE_THE_PRODUCT]]),
     )
 
@@ -252,12 +250,12 @@ async def send_a_post(destination_id: Union[int, str], file_ids: list, text: str
         await bot.send_media_group(destination_id, media)
 
 
-async def user_route(message: types.Message):
+async def user_route(message: Message):
     sender = lambda text, buttons: send_message(message, text, buttons)
     await sender(PROVIDE_THE_DEVICE_NAME, [])
     device_name = (await wait_for_message(
         message, filters=[TEXT_EXISTS_FILTER]
-    )).text
+    )).origin.text
     for string, replacement in replacements.items():
         device_name = device_name.replace(string.lower(), replacement)
     device_operability_rank = await choice(
@@ -269,79 +267,60 @@ async def user_route(message: types.Message):
     await sender(SPECIFY_THE_COMPONENTS, [])
     device_components = (await wait_for_message(
         message, [TEXT_EXISTS_FILTER]
-    )).text
+    )).origin.text
     await sender(PROVIDE_THE_PRICE, [])
     device_price = int((await wait_for_message(
         message, [Filter(
-            filter=lambda message: bool(message.text) and all(
+            filter=lambda message: bool(message.origin.text) and all(
                 character in "1234567890"
-                for character in message.text
+                for character in message.origin.text
             ),
             failure_message=PROVIDE_VALID_PRICE
         )]
-    )).text)
+    )).origin.text)
     meeting_type = await choice(
         message, CHOOSE_THE_MEETING_METHOD, MEETING_METHOD_BUTTONS,
     )
     await sender(PROVIDE_ONE_DEVICE_IMAGE, [])
-    reply = await wait_for_message(message, [Filter(
-        filter=lambda message: bool(message.photo),
+    photos = (await wait_for_message(message, [Filter(
+        filter=lambda message: len(message.file_ids) in (1, 2, 3),
         failure_message=PROVIDE_THE_DEVICE_PHOTO,
-    )])
-    device_photos = [reply.photo[-1].file_id]
-    continuing = False
-    for text in [
-        PROVIDE_THE_SECOND_DEVICE_IMAGE,
-        PROVIDE_THE_THIRD_DEVICE_IMAGE,
-    ]:
-        await sender(text, [[CONTINUE]])
-        while True:
-            reply = await wait_for_message(message)
-            if reply.photo:
-                device_photos.append(reply.photo[-1].file_id)
-                break
-            elif reply.text == CONTINUE:
-                continuing = True
-                break
-            else:
-                await bot.send_message(
-                    message.from_id,
-                    PROVIDE_THE_DEVICE_PHOTO_OR_SKIP
-                )
-        if continuing:
-            break
+    )])).file_ids
     await sender(PROVIDE_THE_ADDITIONAL_INFORMATION, [[CONTINUE]])
-    additional_information = (await wait_for_message(message, [TEXT_EXISTS_FILTER])).text
+    additional_information = (await wait_for_message(message, [TEXT_EXISTS_FILTER])).origin.text
     if additional_information == CONTINUE:
         additional_information = ""
     else:
         additional_information = additional_information
     await sender(REVIEW_THE_RESULT, [[CONTINUE]])
+    attributes = [
+        f"Работоспособность: {device_operability_rank}/{len(OPERABILITY_RANKS)}",
+        f"Внешний вид: {device_visual_appearance_rank}/{len(VISUAL_APPEARANCE_RANKS)}",
+        f"Комплектация: {device_components}",
+        f"Цена: {device_price} рублей",
+        f"Предпочтительный тип встречи: {meeting_type}",
+    ]
+    if additional_information:
+        attributes.append("Дополнительная информация: " + additional_information)
     result_text = (
-        f"Продавец: @{message.from_user.username}\n"
+        f"Продавец: @{message.origin.from_user.username}\n"
         f"\n"
         f"<strong>{device_name}</strong>\n"
-        f"* Работоспособность: {device_operability_rank}/{len(OPERABILITY_RANKS)}\n"
-        f"* Внешний вид: {device_visual_appearance_rank}/{len(VISUAL_APPEARANCE_RANKS)}"
-        f"* Комплектация: {device_components}\n"
-        f"* Цена: {device_price} рублей\n"
-        f"* Предпочтительный тип встречи: {meeting_type}"
+        + "\n".join("* " + attr for attr in attributes)
     )
-    if additional_information:
-        result_text += "\nДополнительная информация: " + additional_information
-    await send_a_post(message.from_id, device_photos, result_text)
+    await send_a_post(message.origin.from_id, photos, result_text)
     await wait_for_message(message, [Filter(
-        filter=lambda message: message.text == CONTINUE,
+        filter=lambda message: message.origin.text == CONTINUE,
         failure_message=PRESS_ONE_OF_THE_BUTTONS,
     )])
-    post_queue.append(Post(file_ids=device_photos, text=result_text))
+    post_queue.append(Post(file_ids=photos, text=result_text))
     await send_first_button(message, ADDED_INTO_QUEUE)
 
 
-async def handle_admin_message(message: types.Message):
-    if message.text in ("/help", "/помощь"):
+async def handle_admin_message(message: Message):
+    if message.origin.text in ("/help", "/помощь"):
         return HELP_MESSAGE
-    match = re.match(r"/замены (.+)", message.text)
+    match = re.match(r"/замены (.+)", message.origin.text)
     if match:
         replacements_text = match.group(1)
         try:
@@ -360,23 +339,24 @@ async def handle_admin_message(message: types.Message):
         return "Сохранено."
 
 
-@dp.message_handler(content_types=types.ContentType.ANY)
-async def start_handler(message: types.Message):
+async def handle_a_new_message(message: Message):
     logger.debug("NEW MESSAGE %s", message)
-    if message.chat.type == "private":
-        if message.from_id in waiting_for_message:
-            if message.text == CANCEL:
-                logger.debug("CANCELED %d", message.from_id)
-                del waiting_for_message[message.from_id]
+    if message.origin.chat.type == "private":
+        if message.origin.from_id in waiting_for_message:
+            if message.origin.text == CANCEL:
+                logger.debug("CANCELED %d", message.origin.from_id)
+                del waiting_for_message[message.origin.from_id]
                 await send_first_button(message, CANCELED)
             else:
                 logger.debug("RECEIVED %s", message)
-                waiting_for_message[message.from_id] = message
-        elif message.text == "/start":
+                if message.origin.text:
+                    message.origin.text = html.escape(message.origin.text)
+                waiting_for_message[message.origin.from_id] = message
+        elif message.origin.text == "/start":
             await send_first_button(message, HELLO)
-        elif message.text == PROVIDE_THE_PRODUCT:
-            if not message.from_user.username:
-                await bot.send_message(message.from_id, YOU_HAVENT_SET_A_USERNAME)
+        elif message.origin.text == PROVIDE_THE_PRODUCT:
+            if not message.origin.from_user.username:
+                await bot.send_message(message.origin.from_id, YOU_HAVENT_SET_A_USERNAME)
             else:
                 try:
                     await user_route(message)
@@ -386,21 +366,44 @@ async def start_handler(message: types.Message):
             await send_first_button(
                 message, PRESS_A_BUTTON_TO_START_FORM_FILLING
             )
-    elif message.chat.id == config.admin_chat_id:
+    elif message.origin.chat.id == config.admin_chat_id:
         response = await handle_admin_message(message)
         if response is not None:
             await bot.send_message(
-                message.chat.id, response, parse_mode=DEFAULT_PARSE_MODE,
+                message.origin.chat.id, response, parse_mode=DEFAULT_PARSE_MODE,
             )
     else:
-        await message.reply(DO_NOT_USE_THE_BOT_IN_GROUPS)
+        await message.origin.reply(DO_NOT_USE_THE_BOT_IN_GROUPS)
 
 
 async def main():
     logger.debug("STARTING!")
-    for task in tasks:
-        asyncio.create_task(task())
-    await dp.start_polling()
+    offset = None
+    while True:
+        updates = await bot.get_updates(
+            offset=offset, timeout=60, allowed_updates=["messages"],
+        )
+        if updates:
+            photos = {}
+            messages = []
+            for update in updates:
+                if update.message.media_group_id:
+                    try:
+                        message = photos[update.message.media_group_id]
+                    except KeyError:
+                        message = Message(origin=update.message, file_ids=[])
+                        messages.append(message)
+                        photos[message.origin.media_group_id] = message
+                    message.file_ids.append(message.origin.photo[-1].file_id)
+                else:
+                    if update.message.photo:
+                        file_ids = [update.message.photo[-1].file_id]
+                    else:
+                        file_ids = []
+                    messages.append(Message(origin=update.message, file_ids=file_ids))
+            for message in messages:
+                asyncio.create_task(handle_a_new_message(message))
+            offset = max(updates, key=lambda update: update.update_id).update_id + 1
 
 
 asyncio.run(main())
