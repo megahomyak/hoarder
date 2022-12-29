@@ -20,9 +20,15 @@ PROVIDE_THE_DEVICE_NAME = """
 RANK_THE_OPERABILITY_OF_THE_DEVICE = """
 Оцените работоспособность девайса по пятибалльной шкале, воспользовавшись кнопками ниже.
 
-Подсказка: "5" значит "девайс в идеальном состоянии и почти не был использован", "4" значит "девайс в хорошем состоянии и был активно использован", "3" значит "девайс имеет некоторые незначительные неисправности", "2" значит "девайс имеет значительные неисправности, мешающие его работе, но они могут быть легко единоразово и быстро исправлены без дополнительного оборудования", "1" значит "девайс показывает признаки жизни, но может не работать".
+Подсказка: "5" значит "девайс в идеальном состоянии", "1" значит "девайс только подаёт признаки жизни".
+""".strip()
+RANK_THE_VISUAL_APPEARANCE_OF_THE_DEVICE = """
+Оцените внешний вид девайса по пятибалльной шкале, воспользовавшись кнопками ниже.
+
+Подсказка: "5" значит "девайс выглядит как новый", "1" значит "девайс выглядит очень изношенным".
 """.strip()
 OPERABILITY_RANKS = list("12345")
+VISUAL_APPEARANCE_RANKS = list("12345")
 SPECIFY_THE_COMPONENTS = """
 Перечислите аксессуары, оставшиеся от устройства. Если их нет, так и напишите.
 
@@ -39,7 +45,7 @@ CANCEL = "Отменить"
 CONTINUE = "Продолжить"
 MEETING_METHOD_BUTTONS = [["Самовывоз"], ["Можем встретиться"]]
 PROVIDE_ONE_DEVICE_IMAGE = """
-Предоставьте <bold>одну</bold> фотографию девайса. Потом вы сможете предоставить ещё одну или две, если необходимо.
+Предоставьте <strong>одну</strong> фотографию девайса. Потом вы сможете предоставить ещё одну или две, если необходимо.
 """.strip()
 PROVIDE_THE_DEVICE_PHOTO = """
 Пожалуйста, предоставьте фотографию девайса.
@@ -254,8 +260,11 @@ async def user_route(message: types.Message):
     )).text
     for string, replacement in replacements.items():
         device_name = device_name.replace(string.lower(), replacement)
-    device_rank = await choice(
+    device_operability_rank = await choice(
         message, RANK_THE_OPERABILITY_OF_THE_DEVICE, [OPERABILITY_RANKS]
+    )
+    device_visual_appearance_rank = await choice(
+        message, RANK_THE_VISUAL_APPEARANCE_OF_THE_DEVICE, [VISUAL_APPEARANCE_RANKS]
     )
     await sender(SPECIFY_THE_COMPONENTS, [])
     device_components = (await wait_for_message(
@@ -312,7 +321,8 @@ async def user_route(message: types.Message):
         f"Продавец: @{message.from_user.username}\n"
         f"\n"
         f"<strong>{device_name}</strong>\n"
-        f"* Работоспособность: {device_rank}/{len(OPERABILITY_RANKS)}\n"
+        f"* Работоспособность: {device_operability_rank}/{len(OPERABILITY_RANKS)}\n"
+        f"* Внешний вид: {device_visual_appearance_rank}/{len(VISUAL_APPEARANCE_RANKS)}"
         f"* Комплектация: {device_components}\n"
         f"* Цена: {device_price} рублей\n"
         f"* Предпочтительный тип встречи: {meeting_type}"
