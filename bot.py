@@ -45,11 +45,18 @@ PROVIDE_THE_PRODUCT = "Предложить товар"
 CANCEL = "Отменить"
 CONTINUE = "Продолжить"
 MEETING_METHOD_BUTTONS = [["Самовывоз"], ["Можем встретиться"]]
-PROVIDE_ONE_DEVICE_IMAGE = """
+PROVIDE_THE_DEVICE_PHOTOS = """
 Предоставьте от одной до трёх фотографий девайса.
 """.strip()
-PROVIDE_THE_DEVICE_PHOTO = """
-Пожалуйста, предоставьте <strong>от одной до трёх</strong> фотографий девайса.
+PRESS_THE_BUTTON_TO_CONTINUE_IF_YOU_ARE_DONE = """
+Нажмите на кнопку для продолжения, если вы закончили.
+""".strip()
+MAX_PHOTOS_AMOUNT = 3
+DO_NOT_PROVIDE_MORE_THAN_THREE_PHOTOS = """
+Пожалуйста, предоставьте <strong>не более трёх</strong> фотографий девайса. Предоставленные вами фотографии были сброшены. Отправьте ещё фотографии.
+""".strip()
+PROVIDE_A_PHOTO_PLEASE = """
+Пожалуйста, предоставьте <i>фотографию</i>.
 """.strip()
 PROVIDE_THE_ADDITIONAL_INFORMATION = """
 Предоставьте дополнительную информацию (или нажмите на кнопку продолжения, если дополнительной информации нет):
@@ -120,7 +127,7 @@ class Post:
 @dataclass
 class Message:
     origin: types.Message
-    file_ids: list
+    photo_ids: list
 
 
 waiting_for_message: Dict[int, Optional[Message]] = {}
@@ -281,11 +288,26 @@ async def user_route(message: Message):
     meeting_type = await choice(
         message, CHOOSE_THE_MEETING_METHOD, MEETING_METHOD_BUTTONS,
     )
-    await sender(PROVIDE_ONE_DEVICE_IMAGE, [])
-    photos = (await wait_for_message(message, [Filter(
-        filter=lambda message: len(message.file_ids) in (1, 2, 3),
-        failure_message=PROVIDE_THE_DEVICE_PHOTO,
-    )])).file_ids
+    await sender(PROVIDE_THE_DEVICE_PHOTOS, [])
+    photo_file_ids = []
+    while True:
+        new_message = await wait_for_message(message)
+        if new_message.origin.text == CONTINUE and len(photo_file_ids) > 1:
+            break
+        elif new_message.photo_ids:
+            old_photos_amount = len(photo_file_ids)
+            photo_file_ids.extend(new_message.photo_ids)
+            if len(photo_file_ids) > MAX_PHOTOS_AMOUNT:
+                photo_file_ids = []
+                await sender(DO_NOT_PROVIDE_MORE_THAN_THREE_PHOTOS, [])
+            elif old_photos_amount == 0:
+                await sender(PRESS_THE_BUTTON_TO_CONTINUE_IF_YOU_ARE_DONE, [[CONTINUE]])
+            else:
+                await sender(f"{len(photo_file_ids)}/{MAX_PHOTOS_AMOUNT}", [[CONTINUE]])
+        else:
+            await bot.send_message(
+                message.origin.from_id, PROVIDE_A_PHOTO_PLEASE, parse_mode=DEFAULT_PARSE_MODE,
+            )
     await sender(PROVIDE_THE_ADDITIONAL_INFORMATION, [[CONTINUE]])
     additional_information = (await wait_for_message(message, [TEXT_EXISTS_FILTER])).origin.text
     if additional_information == CONTINUE:
@@ -308,12 +330,12 @@ async def user_route(message: Message):
         f"<strong>{device_name}</strong>\n"
         + "\n".join("* " + attr for attr in attributes)
     )
-    await send_a_post(message.origin.from_id, photos, result_text)
+    await send_a_post(message.origin.from_id, photo_file_ids, result_text)
     await wait_for_message(message, [Filter(
         filter=lambda message: message.origin.text == CONTINUE,
         failure_message=PRESS_ONE_OF_THE_BUTTONS,
     )])
-    post_queue.append(Post(file_ids=photos, text=result_text))
+    post_queue.append(Post(file_ids=photo_file_ids, text=result_text))
     await send_first_button(message, ADDED_INTO_QUEUE)
 
 
@@ -377,6 +399,8 @@ async def handle_a_new_message(message: Message):
 
 
 async def main():
+    for task in tasks:
+        asyncio.create_task(task())
     logger.debug("STARTING!")
     offset = None
     while True:
@@ -391,16 +415,16 @@ async def main():
                     try:
                         message = photos[update.message.media_group_id]
                     except KeyError:
-                        message = Message(origin=update.message, file_ids=[])
+                        message = Message(origin=update.message, photo_ids=[])
                         messages.append(message)
                         photos[message.origin.media_group_id] = message
-                    message.file_ids.append(message.origin.photo[-1].file_id)
+                    message.photo_ids.append(update.message.photo[-1].file_id)
                 else:
                     if update.message.photo:
                         file_ids = [update.message.photo[-1].file_id]
                     else:
                         file_ids = []
-                    messages.append(Message(origin=update.message, file_ids=file_ids))
+                    messages.append(Message(origin=update.message, photo_ids=file_ids))
             for message in messages:
                 asyncio.create_task(handle_a_new_message(message))
             offset = max(updates, key=lambda update: update.update_id).update_id + 1
