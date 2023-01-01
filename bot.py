@@ -413,20 +413,21 @@ async def main():
             photos = {}
             messages = []
             for update in updates:
-                if update.message.media_group_id:
-                    try:
-                        message = photos[update.message.media_group_id]
-                    except KeyError:
-                        message = Message(origin=update.message, photo_ids=[])
-                        messages.append(message)
-                        photos[message.origin.media_group_id] = message
-                    message.photo_ids.append(update.message.photo[-1].file_id)
-                else:
-                    if update.message.photo:
-                        file_ids = [update.message.photo[-1].file_id]
+                if update.message:
+                    if update.message.media_group_id:
+                        try:
+                            message = photos[update.message.media_group_id]
+                        except KeyError:
+                            message = Message(origin=update.message, photo_ids=[])
+                            messages.append(message)
+                            photos[message.origin.media_group_id] = message
+                        message.photo_ids.append(update.message.photo[-1].file_id)
                     else:
-                        file_ids = []
-                    messages.append(Message(origin=update.message, photo_ids=file_ids))
+                        if update.message.photo:
+                            file_ids = [update.message.photo[-1].file_id]
+                        else:
+                            file_ids = []
+                        messages.append(Message(origin=update.message, photo_ids=file_ids))
             for message in messages:
                 asyncio.create_task(handle_a_new_message(message))
             offset = max(updates, key=lambda update: update.update_id).update_id + 1
