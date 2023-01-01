@@ -406,9 +406,15 @@ async def main():
     logger.debug("STARTING!")
     offset = None
     while True:
-        updates = await bot.get_updates(
-            offset=offset, timeout=60, allowed_updates=["messages"],
-        )
+        while True:
+            try:
+                updates = await bot.get_updates(
+                    offset=offset, timeout=60, allowed_updates=["messages"],
+                )
+            except asyncio.TimeoutError:
+                await asyncio.sleep(0.5)
+            else:
+                break
         if updates:
             photos = {}
             messages = []
