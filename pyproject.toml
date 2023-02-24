@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "hoarder"
-version = "0.1.0"
-description = ""
+version = "1.0.0"
+description = "A bot that allows users to send stuff to sell"
 authors = ["megahomyak <g.megahomyak@gmail.com>"]
 
 [tool.poetry.dependencies]
